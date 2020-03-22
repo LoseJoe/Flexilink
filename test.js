@@ -9,7 +9,7 @@ const ms = require('ms')
 client.login("bot token here")
 prefix = "/"
 
-const lib = require('./libraryV2.js') //Once on npm replace with Flexilink
+const lib = require('./library.js') //Once on npm replace with Flexilink
 
 const nodes = [{
     name: "Node Test #1",
