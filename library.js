@@ -1,4 +1,3 @@
-const { Manager } = require('lavacord')
 const Discord = require('discord.js')
 const ytsearch = require('yt-search')
 const { Shoukaku } = require('shoukaku')
