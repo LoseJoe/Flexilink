@@ -6,16 +6,16 @@ const client = new Discord.Client({
 const ytpl = require('ytpl')
 const ms = require('ms')
 
-client.login("bot token here")
+client.login("token")
 prefix = "/"
 
-const lib = require('./library.js') //Once on npm replace with Flexilink
+const lib = require('flexilink')
 
 const nodes = [{
     name: "Node Test #1",
     host: "localhost",
     port: 2333,
-    auth: "password",
+    auth: "password for lavalink"
 }]
 
 const bassboost_bands = [
@@ -44,6 +44,7 @@ const queues = new Discord.Collection();
 
 client.on("ready", () => {
 	console.log("Bot connected.")
+	client.user.setUsername("Flexilink")
 })
 
 client.on("error", console.error);
@@ -80,7 +81,7 @@ client.on("message", async msg => {
 
         songs = data.tracks
 
-        i = 0
+        var i = 0
 
         var songEmbed = new Discord.MessageEmbed()
         songEmbed.setTitle(`__**Songs:**__`);
@@ -143,14 +144,20 @@ if (command === "skip") {
 
     if (serverQueue.playing === false) serverQueue.playing = true;
 
-    serverQueue.player.stopTrack();
+   	player = node.getCache(msg.guild.id).player
+
+   	if(serverQueue.player.type == "track") serverQueue.player.stopTrack()
+   	if(serverQueue.player.type == "livestream") serverQueue.player.end()
+
     return msg.channel.send("Song skipped.");
 }
 
 if (command === "stop") {
     if (!serverQueue) return msg.channel.send("This server doesn't have a queue");
 
-    node.leave(msg.guild);
+    if(serverQueue.player.type == "track") node.leave(serverQueue.voiceChannel);
+    if(serverQueue.player.type == "livestream") serverQueue.voiceChannel.leave()
+
     queues.delete(msg.guild.id)
 
     return msg.channel.send("Stopped.");
@@ -160,8 +167,9 @@ if (command === "pause") {
     if (!serverQueue) return msg.channel.send("This server doesn't have a queue");
 
     serverQueue.player.playing = false
-    serverQueue.player.setPaused(true)
-
+    
+    if(serverQueue.player.type == "track") serverQueue.player.setPaused(true)
+    if(serverQueue.player.type == "livestream") serverQueue.voiceChannel.dispatcher.pause()
 
     return msg.channel.send("paused.");
 }
@@ -170,7 +178,10 @@ if (command === "resume") {
     if (!serverQueue) return msg.channel.send("This server doesn't have a queue");
 
     serverQueue.player.playing = true
-    serverQueue.player.setPaused(false)
+
+    if(serverQueue.player.type == "track") serverQueue.player.setPaused(false)
+    if(serverQueue.player.type == "livestream") serverQueue.voiceChannel.dispatcher.resume()
+
     return msg.channel.send("resumed.");
 }
 
@@ -184,6 +195,8 @@ if (command === "loop") {
 
 if (command === "bassboost") {
     if (!serverQueue) return msg.channel.send("This server doesn't have a queue");
+
+    if(serverQueue.player.type == "livestream") return message.channel.send("Can't use bassboost on livestreams.")
 
     serverQueue.bassboost = !serverQueue.bassboost;
 
@@ -214,7 +227,9 @@ if (command === "volume") {
 
     if(isNaN(args[0])) return msg.channel.send("Volume must be a number!")
 
-    serverQueue.player.setVolume(args[0])
+    if(serverQueue.player.type == "track") serverQueue.player.setVolume(args[0])
+    if(serverQueue.player.type == "livestream") serverQueue.voiceChannel.dispatcher.volume(args[0])
+
 	serverQueue.volume = args[0]
 
     return msg.channel.send(`Volume set to: ${serverQueue.volume}`);
@@ -222,6 +237,8 @@ if (command === "volume") {
 
 if (command === "seek") {
     if (!serverQueue) return msg.channel.send("This server doesn't have a queue");
+
+    if(serverQueue.player.type == "livestream") return msg.channel.send("Cannot seek on livestreams.")
 
     if(!args[0]) return msg.channel.send(`Current Time: ${ms(serverQueue.player.position)}.`)
 
@@ -233,10 +250,28 @@ if (command === "seek") {
     return msg.channel.send(`Seeking to: ${ms(serverQueue.player.position)}`);
 }
 
+if (command === "info") {
+
+    var stats = await node.getStats()
+
+    console.log(stats)
+
+    return msg.channel.send(`Stats: 
+    	Playing Players: ${stats.playingPlayers}.
+    	Lavalink Memory Reservable: ${stats.memory.reservable / 1073741824} GB.
+    	Lavalink Memory Used: ${stats.memory.used / 1073741824} GB.
+    	Lavalink Memory Free: ${stats.memory.free / 1073741824} GB.
+    	Lavalink Memory Allocated: ${stats.memory.allocated / 1073741824} GB.
+    	Lavalink Players: ${stats.players}.
+    	Uptime: ${ms(stats.uptime)}.
+    	CPU Cores: ${stats.cpu.cores}.
+    	`);
+}
 
 
 
-if (command === "help") return msg.reply("```play, skip, stop, pause, resume, loop, bassboost, queue, nowplaying, volume, seek```")
+
+if (command === "help") return msg.reply("```play, skip, stop, pause, resume, loop, bassboost, queue, nowplaying, volume, seek, info```")
 
 })
 
@@ -264,13 +299,14 @@ async function handleVideo(msg, voiceChannel, song) {
 
             await node.join(voiceChannel, {mute:false, deaf:true})
 
-            play(msg.guild, queueConstruct.songs[0]);
+            play(voiceChannel, queueConstruct.songs[0]);
 
         } catch (error) {
 
-            console.error(`I could not join the voice channel: ${error}`);
+            console.log(`I could not join the voice channel: `);
+            console.log(error)
             queues.delete(msg.guild.id);
-            node.leave(msg.guild) //leave the voice channel
+            node.leave(voiceChannel) //leave the voice channel
             return msg.channel.send(`I could not join the voice channel: ${error.message}`);
 
         };
@@ -281,29 +317,29 @@ async function handleVideo(msg, voiceChannel, song) {
     return;
 };
 
-async function play(guild, song) {
-    let serverQueue = queues.get(guild.id);
+async function play(voiceChannel, song) {
+    let serverQueue = queues.get(voiceChannel.guild.id);
     if (!song) {
         serverQueue.textChannel.send("No more queue to play. The player has been stopped")
-        serverQueue.node.leave(guild);
-        queues.delete(guild.id);
+        serverQueue.node.leave(voiceChannel);
+        queues.delete(voiceChannel.guild.id);
         return;
     } else {
-        serverQueue.player = await serverQueue.node.play(song, guild)
+        serverQueue.player = await serverQueue.node.play(song, voiceChannel)
 
-        serverQueue.player.setEqualizer(serverQueue.bassboost ? bassboost_bands : neutral_bands)
+        if(serverQueue.player.type == "track") serverQueue.player.setEqualizer(serverQueue.bassboost ? bassboost_bands : neutral_bands)
 
         serverQueue.player.once("end", data => {
-            if(data.reason === "REPLACED") return;
+            if(data && data.reason === "REPLACED") return;
             console.log("Song has ended...");
 
             const shiffed = serverQueue.songs.shift();
             if (serverQueue.loop === true) {
                 serverQueue.songs.push(shiffed);
             };
-            play(guild, serverQueue.songs[0])
+            play(voiceChannel, serverQueue.songs[0])
         });
-        serverQueue.player.setVolume(serverQueue.volume);
+        if(serverQueue.player.type == "track") serverQueue.player.setVolume(serverQueue.volume);
         return serverQueue.textChannel.send(`Now playing: **${song.title}** by *${song.author.name}*`);
     };
 };

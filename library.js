@@ -1,6 +1,7 @@
 const Discord = require('discord.js')
 const ytsearch = require('yt-search')
 const { Shoukaku } = require('shoukaku')
+const ytdl = require('ytdl-core')
 
 class Flexilink {
 	constructor(options) {
@@ -43,6 +44,20 @@ class Flexilink {
 	}
 }
 
+class LastValue {
+	constructor() {
+		this.object = {}
+	}
+	getLast(newValue, identifier) {
+		if(!this.object[identifier]) this.object[identifier] = []
+		this.value = this.object[identifier][this.object[identifierl].length - 1]
+		this.object[identifier].push(newValue)
+    if(this.object[identifier].length > 2) this.object[identifier].shift()
+    if(!this.value) return undefined
+		return this.value
+	}
+}
+
 class node {
 	constructor(info) {
 		if (!info) return console.log("Please Specify Node Options.")
@@ -54,7 +69,6 @@ class node {
 		this.node = info
 		this.shoukakuNode = this.node.manager.getNode(this.node.name)
 		this.cache = new Discord.Collection()
-		console.log(this.node)
 	}
 
 	loadTracks(query, type) {
@@ -80,41 +94,60 @@ class node {
 
 	}
 
-	async join(channel, options) {
-		if (!channel) return console.log("Specify Option 'Channel' In Join Options.");
-		if (!channel.guild) return console.log("Couldn't Find Guild In 'channel'.'")
-		if(!options) options = {}
+	getStats() {
+		return this.shoukakuNode.stats
+	}
 
-		options.guildID = channel.guild.id
-		options.voiceChannelID = channel.id
+	async join(voiceChannel, options) {
+		this._checkCache(voiceChannel.guild.id)
+		const serverCache = this.cache.get(voiceChannel.guild.id)
 
-		this._checkCache(channel.guild.id); // guild id
-		var serverCache = this.cache.get(channel.guild.id);
+		if (!voiceChannel) return console.log("Specify Option 'Channel' In Join Options.");
+		if (!voiceChannel.guild) return console.log("Couldn't Find Guild In 'channel'.'")
+		if(!options) options = {deaf:true, mute:false}
 
-		serverCache.player = await this.shoukakuNode.joinVoiceChannel(options);
+		options.guildID = voiceChannel.guild.id
+		options.voiceChannelID = voiceChannel.id
 
-		return serverCache.player;
+		serverCache.options = options
+
+
+		return new Promise(async (res, rej) => {
+			if(serverCache.connection_type == "lavalink") {
+				console.log("joining with lavalink")
+				serverCache.player = await this.shoukakuNode.joinVoiceChannel(options)
+				res(serverCache.player)
+			}
+
+			if(serverCache.connection_type == "ytdl") {
+				console.log("joining with ytdl")
+				serverCache.connection = await voiceChannel.join()
+				res(serverCache.connection)
+			}
+		})
 
 	}
 
-	async leave(guild) {
-		if (!guild) return console.log("Specify Option 'Guild', In Leave Options.");
-		if (!guild.id) return console.log("Couldn't Find ID In 'guild'.");
+	async leave(voiceChannel) {
+		this._checkCache(voiceChannel.guild.id)		
+		var serverCache = this.cache.get(voiceChannel.guild.id)
 
-		this._checkCache(guild.id);
-		var serverCache = this.cache.get(guild.id);
+		if(serverCache.connection_type == "lavalink") {
+			var result = await serverCache.player.disconnect()
+			serverCache.player = null;
+		}
 
-		var result = serverCache.player.disconnect()
-		serverCache.player = null;
-
-		return result
+		if(serverCache.connection_type == "ytdl") {
+			var result = await voiceChannel.leave()
+			serverCache.connection = null;
+		}
 
 	}
 
-	async play(song, guild) {
+	async play(song, voiceChannel) {
+		this._checkCache(voiceChannel.guild.id)
 
-		this._checkCache(guild.id);
-		var serverCache = this.cache.get(guild.id);
+		var serverCache = this.cache.get(voiceChannel.guild.id)
 
 		if (!song.track) {
 			var songData = await this.shoukakuNode.rest.resolve(song.url);
@@ -122,20 +155,93 @@ class node {
 		}
 
 		if(song.info.isStream) {
-			console.log("Currently doesn't support livestreams. But will try anyway. (FIXING SOON)")
+			await this._switchToLive(voiceChannel)
+		} else {
+			await this._switchToTrack(voiceChannel)
 		}
 
-		if (!song.track) return console.log("Specify Option 'track', In Play Options.")
+		console.log(serverCache.connection_type)
 
+		if(serverCache.connection_type == "lavalink") {
+			if(serverCache.player) {
+				serverCache.player.playTrack(song.track)
+				serverCache.player.type = "track"
+				return serverCache.player
+			}
+		}
 
-		serverCache.player.playTrack(song.track)
-		return serverCache.player
+		if(serverCache.connection_type == "ytdl") {
+			if(serverCache.connection) {
+				serverCache.player = await ytdl(song.info.uri, {quality: 'highestaudio', highWaterMark:600000, volume: 0.1})
+				serverCache.dispatcher = await serverCache.connection.play(serverCache.player)
+				serverCache.dispatcher.setVolume(0.1)
+				serverCache.player.type = "livestream"
+				return serverCache.player
+			}
+		}
+
+	}
+
+	getCache(guildid) {
+		this._checkCache(guildid)
+		return this.cache.get(guildid)
+	}
+
+	_switchToLive(voiceChannel) {
+		return new Promise(async (res, rej) => {
+			this._checkCache(voiceChannel.guild.id)
+			var serverCache = this.cache.get(voiceChannel.guild.id)
+
+			if(serverCache.connection_type == "ytdl") return res(undefined)
+
+			console.log("Disconnecting Lavalink.")
+			await serverCache.player.disconnect()
+			serverCache.player = null;
+
+			console.log("connecting on discord.js")
+
+			setTimeout(async () => {
+				serverCache.connection = await voiceChannel.join()
+
+				serverCache.connection_type = "ytdl"
+				res(serverCache.connection_type)
+			}, 1000)
+		})
+	}
+
+	_switchToTrack(voiceChannel) {
+		return new Promise(async (res, rej) => {
+			this._checkCache(voiceChannel.guild.id)
+			var serverCache = this.cache.get(voiceChannel.guild.id)
+
+			if(serverCache.connection_type == "lavalink") return res(undefined)
+			console.log("disconnecting on discord.js")
+
+			await voiceChannel.leave()
+			console.log("connecting on lavalink")
+
+			setTimeout(async () => {
+
+				var options = serverCache.options
+				options.guildID = voiceChannel.guild.id
+				options.voiceChannelID = voiceChannel.id
+
+				serverCache.player = await this.shoukakuNode.joinVoiceChannel(options)
+				serverCache.connection = null;
+				serverCache.connection_type = "lavalink"
+
+				res(serverCache.connection_type)
+			}, 1000)
+		})
+
 	}
 
 	_checkCache(guild) {
 		if (!this.cache.has(guild)) this.cache.set(guild, {
 			connection: null,
-			player: null
+			player: null,
+			connection_type: "lavalink",
+			isLive: false
 		})
 	}
 
@@ -208,6 +314,7 @@ function parseInfo(info) {
 		res(parsedInfo)
 	})
 }
+
 
 
 module.exports = Flexilink;
