@@ -1,0 +1,22 @@
+{
+
+  "prefix": {
+    "type":"string",
+    "c_name":"prefix",
+    "default":"f!"
+  },
+
+  "mod-log": {
+    "type":"channel",
+    "c_name":"mod_log",
+    "default":"defaultChannel"
+  },
+
+  "auto-moderator": {
+    "type":"choice",
+    "choices":["high", "med", "low"],
+    "c_name":"auto_mod",
+    "default":"low"
+  }
+
+}

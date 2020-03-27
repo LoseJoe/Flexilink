@@ -1,0 +1,37 @@
+{
+    
+    "botToken":"undefined",
+    "topGGToken":"undefined",
+    "defaultGuildDB":{"config":{}},
+
+    "prefix":"fl",
+
+	"client_options":{
+		"disableEveryone":true,
+		"fetchAllMembers":false,
+		"messageCacheMaxSize":5,
+		"messageCacheLifetime":300,
+		"messageSweepInterval":30,
+		"disabledEvents":[
+			"USER_UPDATE",
+			"USER_NOTE_UPDATE",
+			"USER_SETTINGS_UPDATE",
+			"PRESENCE_UPDATE",
+			"TYPING_START",
+			"WEBHOOKS_UPDATE"
+		]
+	},
+
+    "flexilinkNodes":[
+        {
+            "name": "Node Test #1",
+            "host": "localhost",
+            "port": "2333",
+            "auth": "flexilinkisthefuture"
+        }
+    ],
+    
+    "creators":"LoseJoe",
+    "bypass":["514951951243411467"]
+}
+
